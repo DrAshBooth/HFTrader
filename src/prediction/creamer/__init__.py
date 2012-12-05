@@ -1,8 +1,13 @@
 from parameters import *
+from expert import *
 
 class Predictor(object):
-    def __init__(self):
+    def __init__(self, nef, max_experts=25, c=1):
+        self.t=0
+        self.c=c
         self.experts = []
+        self.new_exp_freq = nef
+        self.writeSpecification()
         
     def writeSpecification(self):
         import os
@@ -115,7 +120,7 @@ class Predictor(object):
         
         spec.close()
 
-    def createClassifier(self, filename):
+    def createClassifier(self, time, start_training, end_training, file_name, verbose):
         import os
         import rpy2
         from rpy2.robjects.numpy2ri import numpy2ri
@@ -123,24 +128,70 @@ class Predictor(object):
         ro.conversion.py2ri = numpy2ri
         #rpy2.robjects.numpy2ri.activate()
         from rpy2.robjects import r
+        import subprocess
         
         # Run R script that does all statistics and creates an xts for complete date range
         r('source("{}/oneStockXTS.r")'.format(os.getcwd()))
         r('setwd("{}")'.format(os.getcwd()))
         
-#        # DONT FORGET THE LAG!
-#        startDatabase = STARTDATE - training_window - lag_date
-#        endDatabase = ENDDATE
-#        r.assign('remoteTICKER', ticker.split()[0])
-#        r.assign('remoteSTART', startDatabase.strftime('%Y%m%d'))
-#        r.assign('remoteEND', endDatabase.strftime('%Y%m%d'))
-#        r('DB<-createDatabase(remoteTICKER,remoteSTART,remoteEND)')
-#        
-#        # Need to get a vector of datetimes of trading days
-#        theUTCdates = r('index(DB)')
-#        tradingDays = []  # to be populated with all of the dates that we wish to trade on
-#        # iterate through r timestamps; once we hit the STARTDATE, start appending 
-#        # datetime objects of the dates to the tradingDay list
-#        for date in theUTCdates:
-#            if date >= time.mktime(STARTDATE.timetuple()):
-#                tradingDays.append(datetime.datetime.fromtimestamp(date))
+        # DONT FORGET THE LAG!
+        r.assign('remote_filename', file_name)
+        r.assign('remoteSTART', start_training.strftime('%Y%m%d'))
+        r.assign('remoteEND', end_training.strftime('%Y%m%d'))
+        r('DB<-createDatabase(remote_filename,remoteSTART,remoteEND)')
+        
+        # write training file 
+        # write test data file
+        
+        # Run bash script to invoke learner and generate classifier
+        if verbose: print("Creating classifier using Jboost with runADTree.sh bash script..\n\n")
+        command_line = '{}/runADTree.sh '.format(os.getcwd()) + os.getcwd() + ' ' + file_name
+        process = subprocess.Popen([command_line], shell=True)
+        retcode = process.wait()
+        
+        # import classifier from file made on the fly
+        if verbose: print("Importing classifier...\n")
+        test_file = file_name + '.test'
+        spec_file = 'spec.spec'
+        classifier_name = '{}predict'.format(file_name)
+        m = __import__(classifier_name, globals(), locals(), ['ADTree'])
+        
+        # Add new expert to list of experts
+        self.experts.append(Expert(getattr(m, 'ATree'), time, self.new_exp_freq, (not self.experts)))
+
+        # To use a classifier, create an object as below
+        # classifier = self.experts[x].module(test_file, spec_file) 
+
+    def reweightExperts(self, time):
+        for expert in self.experts:
+            if expert.first:
+                expert.weight = math.exp((self.c*expert.cummulative_return)/math.sqrt(float(time)))
+            elif time-expert.born_at==0:
+                weight_sum = 0
+                for e in self.experts: weight_sum+= e.weight
+                expert.initial_weight = weight_sum/float(len(self.experts))
+                expert.weight=expert.initial_weight
+            else:
+                ramp = min((time-expert.born_at)/float(self.new_exp_freq))
+                weight_factor = math.exp((self.c*expert.cummulative_return)/math.sqrt(float(time-expert.born_at)))
+                expert.weight = expert.initial_weight*ramp*weight_factor
+                
+    def getExpertsPrediction(self, filename):
+        long_sum = 0.0
+        total_sum = 0.0
+        test_file = filename + '.test'
+        spec_file = 'spec.spec'
+        for expert in self.experts:
+            classifier = expert.module(test_file, spec_file)
+            score = classifier.get_scores()[0][0]
+            if score>0: long_sum+=expert.weight
+            total_sum += expert.weight
+        fraction_long = long_sum/float(total_sum)
+        fraction_short = 1-fraction_long
+        return fraction_long-fraction_short
+                
+    def makePrediction(self):
+        self.t+=1
+        # create classifier
+        # reweight experts
+        # risk management

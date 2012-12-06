@@ -1,18 +1,51 @@
 from parameters import *
 from expert import *
 
+import os
+import rpy2
+import subprocess
+import datetime
+import math
+import time
+
+from rpy2.robjects.numpy2ri import numpy2ri
+import rpy2.robjects as ro
+ro.conversion.py2ri = numpy2ri
+#rpy2.robjects.numpy2ri.activate()
+from rpy2.robjects import r
+
 class Predictor(object):
-    def __init__(self, nef, max_experts=25, c=1):
-        self.t=0
+    def __init__(self, start, end, ticker, nef=5, max_experts=48, c=1):
+        self.date= start-datetime.timedelta(days=1)
+        self.trading_days_seen=0
+        self.start_trading_after=50
         self.c=c
         self.experts = []
         self.new_exp_freq = nef
-        self.writeSpecification()
+        self.max_experts = max_experts
+        self.start = start
+        self.end = end
+        self.training_periods = [50,100,150,200]
+        self.lag = 100
+        self.ticker = ticker
+        self.__writeSpecification()
+        self.__createRDB()
         
-    def writeSpecification(self):
-        import os
+    def __createRDB(self):
+        # Run R script that does all statistics and creates an xts for complete date range
+        r('source("/Users/user/git/HFTrader/src/prediction/creamer/oneStockXTS.r")')
+        r('setwd("/Users/user/git/HFTrader/src/prediction/creamer")')
+        startDatabase = self.start - datetime.timedelta(days=(max(self.training_periods) - self.lag))
+        endDatabase = self.end
+        r.assign('remoteTICKER', self.ticker)
+        r.assign('remoteSTART', startDatabase.strftime('%Y%m%d'))
+        r.assign('remoteEND', endDatabase.strftime('%Y%m%d'))
+        r('DB<-createDatabase(remoteTICKER,remoteSTART,remoteEND)')
+        
+    def __writeSpecification(self):
         spec = open('{}/spec.spec'.format(os.getcwd()), 'w')
         spec.write('exampleTerminator=;\nattributeTerminator=,\nmaxBadExa=5\n')
+        spec.write('Open\t\t\tnumber\n')
         spec.write('EMAn{}\t\t\tnumber\n'.format(EMAn1))
         spec.write('EMAn{}\t\t\tnumber\n'.format(EMAn2))
         spec.write('EMAn{}\t\t\tnumber\n'.format(EMAn3))
@@ -120,78 +153,137 @@ class Predictor(object):
         
         spec.close()
 
-    def createClassifier(self, time, start_training, end_training, file_name, verbose):
-        import os
-        import rpy2
-        from rpy2.robjects.numpy2ri import numpy2ri
-        import rpy2.robjects as ro
-        ro.conversion.py2ri = numpy2ri
-        #rpy2.robjects.numpy2ri.activate()
-        from rpy2.robjects import r
-        import subprocess
-        
-        # Run R script that does all statistics and creates an xts for complete date range
-        r('source("{}/oneStockXTS.r")'.format(os.getcwd()))
-        r('setwd("{}")'.format(os.getcwd()))
-        
-        # DONT FORGET THE LAG!
-        r.assign('remote_filename', file_name)
-        r.assign('remoteSTART', start_training.strftime('%Y%m%d'))
-        r.assign('remoteEND', end_training.strftime('%Y%m%d'))
-        r('DB<-createDatabase(remote_filename,remoteSTART,remoteEND)')
-        
-        # write training file 
-        # write test data file
-        
-        # Run bash script to invoke learner and generate classifier
-        if verbose: print("Creating classifier using Jboost with runADTree.sh bash script..\n\n")
-        command_line = '{}/runADTree.sh '.format(os.getcwd()) + os.getcwd() + ' ' + file_name
-        process = subprocess.Popen([command_line], shell=True)
-        retcode = process.wait()
-        
-        # import classifier from file made on the fly
-        if verbose: print("Importing classifier...\n")
-        test_file = file_name + '.test'
-        spec_file = 'spec.spec'
-        classifier_name = '{}predict'.format(file_name)
-        m = __import__(classifier_name, globals(), locals(), ['ADTree'])
-        
-        # Add new expert to list of experts
-        self.experts.append(Expert(getattr(m, 'ATree'), time, self.new_exp_freq, (not self.experts)))
+    def getTradingDates(self):
+        the_UTC_dates = r('index(DB)')
+        trading_dates = []  # to be populated with all of the dates that we wish to trade on
+        # iterate through r time-stamps; once we hit the STARTDATE, start appending 
+        # datetime objects of the dates to the tradingDay list
+        for date in the_UTC_dates:
+            if date >= time.mktime(self.start.timetuple()):
+                trading_dates.append(datetime.datetime.fromtimestamp(date))
+        return trading_dates
 
-        # To use a classifier, create an object as below
-        # classifier = self.experts[x].module(test_file, spec_file) 
+    def createClassifiers(self, verbose):
+        test_date=self.date
+        for window in self.training_periods:
+            training_start = test_date - datetime.timedelta(days = int(1.7*window))
+            day_before = test_date - datetime.timedelta(days=1)
+            filename = training_start.strftime('%Y%m%d') + test_date.strftime('%Y%m%d') + self.ticker
+            
+            # Generate features:
+            # (make CSV from the R database [mustn't forget to drop the close column]) 
+            if verbose:
+                print('Generating feature csvs from R xts..\n')
+                print('Current window = {}\n\n'.format(filename))
+            r.assign('windowStart', training_start.strftime('%Y-%m-%d'))
+            r.assign('windowEnd', day_before.strftime('%Y-%m-%d'))
+            r.assign('testDate', test_date.strftime('%Y-%m-%d'))
+            r('windowDB<-DB[paste(windowStart,windowEnd,sep="/")]')
+            r('windowDB<-subset(windowDB, select = -c(close,ticker) )')
+            r('testDB<-DB[testDate]')
+            r('testDB<-subset(testDB, select = -c(close,ticker) )')
+            r.assign('remoteFilename', filename)
+            r('write.table(windowDB, file=paste(remoteFilename, "train", sep="."),quote=FALSE,sep=",",eol=";\n",row.names=FALSE,col.names=FALSE)')
+            r('write.table(testDB, file=paste(remoteFilename, "test", sep="."),quote=FALSE,sep=",",eol=";\n",row.names=FALSE,col.names=FALSE)')
+        
+            # Run bash script to invoke learner and generate classifier
+            if verbose: print("Creating classifier using Jboost with runADTree.sh bash script..\n\n")
+            command_line = '{}/runADTree.sh '.format(os.getcwd()) + os.getcwd() + ' ' + filename
+            process = subprocess.Popen([command_line], shell=True)
+            retcode = process.wait()
+            
+            # import classifier from file made on the fly
+            if verbose: print("Importing classifier...\n")
+            test_file = filename + '.test'
+            spec_file = 'spec.spec'
+            classifier_name = '{}predict'.format(filename)
+            m = __import__(classifier_name, globals(), locals(), ['ADTree'])
+            
+            # Add new expert to list of experts
+            self.experts.append(Expert(getattr(m, 'ATree'), self.trading_days_seen, self.new_exp_freq, (not self.experts)))
+            # remove oldest expert
+            if len(self.experts)>=self.max_experts: self.experts.pop(0)
+            
+            # delete all files generated above
+            os.remove(filename + '.info')
+            os.remove(filename + '.log')
+            os.remove(filename + '.output.tree')
+            os.remove(filename + '.train')
+            os.remove(filename + '.test')
+            os.remove(filename + '.test.boosting.info')
+            os.remove(filename + '.train.boosting.info')
+            os.remove(filename + 'predict.py')
+            os.remove(filename + 'predict.pyc')
 
-    def reweightExperts(self, time):
+    def reweightExperts(self):
+        the_time = self.trading_days_seen
         for expert in self.experts:
             if expert.first:
-                expert.weight = math.exp((self.c*expert.cummulative_return)/math.sqrt(float(time)))
-            elif time-expert.born_at==0:
+                expert.weight = math.exp((self.c*expert.cummulative_return)/math.sqrt(float(the_time)))
+            elif the_time-expert.born_at==0:
                 weight_sum = 0
                 for e in self.experts: weight_sum+= e.weight
                 expert.initial_weight = weight_sum/float(len(self.experts))
                 expert.weight=expert.initial_weight
             else:
-                ramp = min((time-expert.born_at)/float(self.new_exp_freq))
-                weight_factor = math.exp((self.c*expert.cummulative_return)/math.sqrt(float(time-expert.born_at)))
+                ramp = min((the_time-expert.born_at)/float(self.new_exp_freq))
+                weight_factor = math.exp((self.c*expert.cummulative_return)/math.sqrt(float(the_time-expert.born_at)))
                 expert.weight = expert.initial_weight*ramp*weight_factor
                 
-    def getExpertsPrediction(self, filename):
+    def getExpertsPrediction(self, verbose):
         long_sum = 0.0
         total_sum = 0.0
-        test_file = filename + '.test'
+        test_file = 'experts.test'
         spec_file = 'spec.spec'
+        
+        # Create "test set" from r DB
+        if verbose: print "Generating test-set file... \n"
+        test_date=self.date
+        r.assign('testDate', test_date.strftime('%Y-%m-%d'))
+        r('testDB<-DB[testDate]')
+        the_open = r('testDB$open')
+        the_close = r('testDB$close')
+        r('testDB<-subset(testDB, select = -c(close,ticker) )')
+        r.assign('remoteFilename', test_file)
+        r('write.table(testDB, file=remoteFilename,quote=FALSE,sep=",",eol=";\n",row.names=FALSE,col.names=FALSE)')
         for expert in self.experts:
             classifier = expert.module(test_file, spec_file)
             score = classifier.get_scores()[0][0]
+            expert.prediction = score
             if score>0: long_sum+=expert.weight
             total_sum += expert.weight
         fraction_long = long_sum/float(total_sum)
         fraction_short = 1-fraction_long
-        return fraction_long-fraction_short
+        # Delete test file
+        os.remove(test_file)
+        return fraction_long-fraction_short, the_open, the_close
+    
+    def riskManagement(self,prediction):
+        return None
+    
+    def reviewExperts(self, the_open, the_close):
+        # need to work out return for all experts and add to cumulative return
+        abs_return = (the_close-the_open)/float(the_open)
+        if (the_open-the_close)>0.0: go_long=True
+        else: go_long=False
+        for exp in self.experts:
+            if go_long:
+                if exp.prediction>0.0: exp.cummulative_return+=abs_return
+                else: exp.cummulative_return-=abs_return
+            else:
+                if exp.prediction<0.0: exp.cummulative_return+=abs_return
+                else: exp.cummulative_return-=abs_return
                 
-    def makePrediction(self):
-        self.t+=1
-        # create classifier
-        # reweight experts
-        # risk management
+    def makePrediction(self,date,verbose):
+        self.date=date
+        self.trading_days_seen+=1
+        if self.trading_days_seen%self.new_exp_freq==0:
+            self.createClassifiers(verbose)
+        self.reweightExperts()
+        prediction, the_open, the_close = self.getExpertsPrediction(verbose)
+        #self.riskManagement(prediction)
+        if self.trading_days_seen>=self.start_trading_after:
+            1
+            # Trade
+        self.reviewExperts(the_open, the_close)
+        

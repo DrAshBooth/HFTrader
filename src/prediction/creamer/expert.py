@@ -21,5 +21,6 @@ class Expert(object):
         self.cummulative_return = 0.0
         self.initial_weight = None
         self.weight = None
+        self.prediction=None
         
         

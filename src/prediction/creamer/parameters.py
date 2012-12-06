@@ -5,14 +5,14 @@ Created on Dec 3, 2012
 '''
 import numpy
  
-LONGLAG = 100
-TICKERS = ["ADBE US Equity"]
-# TICKERS = ["AAPL US Equity", "GOOG US Equity", "ADBE US Equity", "COST US Equity", "DELL US Equity", "VOD US Equity", "YHOO US Equity", "TXN US Equity"]
-TICKERS = numpy.array(TICKERS)
 
-BUY = 1
-SELL = -1
-HOLD = 0
+#TICKERS = ["ADBE US Equity"]
+#TICKERS = ["AAPL US Equity", "GOOG US Equity", "ADBE US Equity", "COST US Equity", "DELL US Equity", "VOD US Equity", "YHOO US Equity", "TXN US Equity"]
+#TICKERS = numpy.array(TICKERS)
+
+#BUY = 1
+#SELL = -1
+#HOLD = 0
 
 EMAn1 = 10
 EMAn2 = 16

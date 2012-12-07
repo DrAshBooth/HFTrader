@@ -17,7 +17,7 @@ from rpy2.robjects import r
 class Predictor(object):
     def __init__(self, start, end, ticker, nef=5, max_experts=48, c=1):
         self.date= start-datetime.timedelta(days=1)
-        self.trading_days_seen=0
+        self.trading_days_seen=1
         self.start_trading_after=50
         self.c=c
         self.experts = []
@@ -28,6 +28,7 @@ class Predictor(object):
         self.training_periods = [50,100,150,200]
         self.lag = 100
         self.ticker = ticker
+        self.threshold = 0.2
         self.__writeSpecification()
         self.__createRDB()
         
@@ -35,7 +36,7 @@ class Predictor(object):
         # Run R script that does all statistics and creates an xts for complete date range
         r('source("/Users/user/git/HFTrader/src/prediction/creamer/oneStockXTS.r")')
         r('setwd("/Users/user/git/HFTrader/src/prediction/creamer")')
-        startDatabase = self.start - datetime.timedelta(days=(max(self.training_periods) - self.lag))
+        startDatabase = self.start - datetime.timedelta(days=(max(self.training_periods) + self.lag+20))
         endDatabase = self.end
         r.assign('remoteTICKER', self.ticker)
         r.assign('remoteSTART', startDatabase.strftime('%Y%m%d'))
@@ -43,7 +44,7 @@ class Predictor(object):
         r('DB<-createDatabase(remoteTICKER,remoteSTART,remoteEND)')
         
     def __writeSpecification(self):
-        spec = open('{}/spec.spec'.format(os.getcwd()), 'w')
+        spec = open('{}/prediction/creamer/spec.spec'.format(os.getcwd()), 'w')
         spec.write('exampleTerminator=;\nattributeTerminator=,\nmaxBadExa=5\n')
         spec.write('Open\t\t\tnumber\n')
         spec.write('EMAn{}\t\t\tnumber\n'.format(EMAn1))
@@ -78,10 +79,10 @@ class Predictor(object):
         spec.write('RSIn{}\t\t\tnumber\n'.format(RSIn3))
         spec.write('FASTKn{}\t\tnumber\n'.format(FASTKn1))
         spec.write('FASTKn{}\t\tnumber\n'.format(FASTKn2))
-        spec.write('FASTKn{}\t\tnumber\n'.format(FASTKn2))
+        spec.write('FASTKn{}\t\tnumber\n'.format(FASTKn3))
         spec.write('FASTDn{}\t\tnumber\n'.format(FASTKn1))
         spec.write('FASTDn{}\t\tnumber\n'.format(FASTKn2))
-        spec.write('FASTDn{}\t\tnumber\n'.format(FASTKn2))
+        spec.write('FASTDn{}\t\tnumber\n'.format(FASTKn3))
         spec.write('SLOWKn{}\t\tnumber\n'.format(FASTKn1))
         spec.write('SLOWKn{}\t\tnumber\n'.format(FASTKn2))
         spec.write('SLOWKn{}\t\tnumber\n'.format(FASTKn3))
@@ -150,7 +151,7 @@ class Predictor(object):
         spec.write('pviTR\t\t(buy, sell, hold)\n')
         spec.write('nviTR\t\t(buy, sell, hold)\n')
         spec.write('labels\t\t\t(-1,1)')
-        
+
         spec.close()
 
     def getTradingDates(self):
@@ -200,7 +201,7 @@ class Predictor(object):
             m = __import__(classifier_name, globals(), locals(), ['ADTree'])
             
             # Add new expert to list of experts
-            self.experts.append(Expert(getattr(m, 'ATree'), self.trading_days_seen, self.new_exp_freq, (not self.experts)))
+            self.experts.append(Expert(getattr(m, 'ATree'), self.trading_days_seen, self.new_exp_freq, (len(self.experts)<=len(self.training_periods))))
             # remove oldest expert
             if len(self.experts)>=self.max_experts: self.experts.pop(0)
             
@@ -217,16 +218,17 @@ class Predictor(object):
 
     def reweightExperts(self):
         the_time = self.trading_days_seen
-        for expert in self.experts:
+        for i, expert in enumerate(self.experts):
             if expert.first:
-                expert.weight = math.exp((self.c*expert.cummulative_return)/math.sqrt(float(the_time)))
+                expert.weight = math.exp((self.c*expert.cummulative_return)/math.sqrt(the_time))
             elif the_time-expert.born_at==0:
                 weight_sum = 0
-                for e in self.experts: weight_sum+= e.weight
-                expert.initial_weight = weight_sum/float(len(self.experts))
+                for e in range(i): 
+                    weight_sum+= self.experts[e].weight
+                expert.initial_weight = weight_sum/float(len(self.experts[:i]))
                 expert.weight=expert.initial_weight
             else:
-                ramp = min((the_time-expert.born_at)/float(self.new_exp_freq))
+                ramp = min((the_time-expert.born_at)/float(self.new_exp_freq),1.0)
                 weight_factor = math.exp((self.c*expert.cummulative_return)/math.sqrt(float(the_time-expert.born_at)))
                 expert.weight = expert.initial_weight*ramp*weight_factor
                 
@@ -241,8 +243,8 @@ class Predictor(object):
         test_date=self.date
         r.assign('testDate', test_date.strftime('%Y-%m-%d'))
         r('testDB<-DB[testDate]')
-        the_open = r('testDB$open')
-        the_close = r('testDB$close')
+        the_open = float(r('testDB$open')[0])
+        the_close = float(r('testDB$close')[0])
         r('testDB<-subset(testDB, select = -c(close,ticker) )')
         r.assign('remoteFilename', test_file)
         r('write.table(testDB, file=remoteFilename,quote=FALSE,sep=",",eol=";\n",row.names=FALSE,col.names=FALSE)')
@@ -259,12 +261,13 @@ class Predictor(object):
         return fraction_long-fraction_short, the_open, the_close
     
     def riskManagement(self,prediction):
-        return None
+        if abs(prediction)<self.threshold: return 0.0
+        else: return prediction
     
     def reviewExperts(self, the_open, the_close):
         # need to work out return for all experts and add to cumulative return
         abs_return = (the_close-the_open)/float(the_open)
-        if (the_open-the_close)>0.0: go_long=True
+        if (the_close-the_open)>0.0: go_long=True
         else: go_long=False
         for exp in self.experts:
             if go_long:
@@ -276,14 +279,12 @@ class Predictor(object):
                 
     def makePrediction(self,date,verbose):
         self.date=date
-        self.trading_days_seen+=1
-        if self.trading_days_seen%self.new_exp_freq==0:
+        if self.trading_days_seen%self.new_exp_freq==1:
             self.createClassifiers(verbose)
         self.reweightExperts()
         prediction, the_open, the_close = self.getExpertsPrediction(verbose)
-        #self.riskManagement(prediction)
-        if self.trading_days_seen>=self.start_trading_after:
-            1
-            # Trade
+        prediction = self.riskManagement(prediction)
         self.reviewExperts(the_open, the_close)
+        self.trading_days_seen+=1
+        return prediction,(the_close>the_open)
         

@@ -39,23 +39,23 @@ library(fGarch)
 LONGLAG<-61
 
 ### newCode
-createNewDatabase <-function(filename) {
-
-  # Creae dataframe from csv
-  all_data<-read.csv("20120621AAPL US Equityopen.csv",header=F)
+#createNewDatabase <-function(filename) {
+#
+#  # Creae dataframe from csv
+#  all_data<-read.csv("20120621AAPL US Equityopen.csv",header=F)
+#  
+#  # Pull out the trades
+#  trade_data <- all_data[all_data[2]=='TRADE',]
+#  
+#  ## function for converting to string of times to time objects 
+#  trade_data$V1 <- as.POSIXct(trade_data$V1, "%Y-%m-%d %H:%M:%S")
   
-  # Pull out the trades
-  trade_data <- all_data[all_data[2]=='TRADE',]
+#  # Move to XTS
+#  trade_XTS<- xts(trade_data[,-1], order.by=trade_data[,1])
   
-  ## function for converting to string of times to time objects 
-  trade_data$V1 <- as.POSIXct(trade_data$V1, "%Y-%m-%d %H:%M:%S")
-  
-  # Move to XTS
-  trade_XTS<- xts(trade_data[,-1], order.by=trade_data[,1])
-  
-  # create a vector of times at 10 sec intervals
-  x<-as.POSIXct('2012-06-21 14:00:00', "%Y-%m-%d %H:%M:%S") + 10*c(1:5)
-}
+#  # create a vector of times at 10 sec intervals
+#  x<-as.POSIXct('2012-06-21 14:00:00', "%Y-%m-%d %H:%M:%S") + 10*c(1:5)
+#}
 
 
 

@@ -37,7 +37,7 @@ class Predictor(object):
         r('source("/Users/user/git/HFTrader/src/prediction/creamer/oneStockXTS.r")')
         r('setwd("/Users/user/git/HFTrader/src/prediction/creamer")')
         startDatabase = self.start - datetime.timedelta(days=(max(self.training_periods) + self.lag+20))
-        endDatabase = self.end
+        endDatabase = self.end+datetime.timedelta(days=20)
         r.assign('remoteTICKER', self.ticker)
         r.assign('remoteSTART', startDatabase.strftime('%Y%m%d'))
         r.assign('remoteEND', endDatabase.strftime('%Y%m%d'))
@@ -258,16 +258,20 @@ class Predictor(object):
         fraction_short = 1-fraction_long
         # Delete test file
         os.remove(test_file)
-        return fraction_long-fraction_short, the_open, the_close
+        # next close
+        tomorrow = test_date+datetime.timedelta(days=1)
+        r.assign('remoteTomorrow',tomorrow)
+        next_close = float(r('DB[remoteTomorrow]$close')[0])
+        return fraction_long-fraction_short, the_open, the_close, next_close
     
     def riskManagement(self,prediction):
         if abs(prediction)<self.threshold: return None
         else: return prediction
     
-    def reviewExperts(self, the_open, the_close):
+    def reviewExperts(self, the_close, next_close):
         # need to work out return for all experts and add to cumulative return
-        abs_return = (the_close-the_open)/float(the_open)
-        if (the_close-the_open)>0.0: go_long=True
+        abs_return = (next_close-the_close)/float(the_close)
+        if (next_close-the_close)>0.0: go_long=True
         else: go_long=False
         for exp in self.experts:
             if go_long:
@@ -282,9 +286,9 @@ class Predictor(object):
         if self.trading_days_seen%self.new_exp_freq==1:
             self.createClassifiers(verbose)
         self.reweightExperts()
-        prediction, the_open, the_close = self.getExpertsPrediction(verbose)
+        prediction, the_open, the_close, next_close = self.getExpertsPrediction(verbose)
         prediction = self.riskManagement(prediction)
-        self.reviewExperts(the_open, the_close)
+        self.reviewExperts(the_close, next_close)
         self.trading_days_seen+=1
         return prediction, the_open, the_close
         

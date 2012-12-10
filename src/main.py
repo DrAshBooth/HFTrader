@@ -22,7 +22,7 @@ if __name__ == '__main__':
     ##################################################
     
     start_test = datetime.date(2011, 01, 01)
-    end_test = datetime.date(2012, 01, 01)
+    end_test = datetime.date(2011, 02, 01)
     ticker = 'AAPL'
     
     data_handler = dc.DataContainer(['creamer','ash'])

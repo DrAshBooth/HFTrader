@@ -3,7 +3,8 @@
 # @author: Ash Booth
 #
 # This creates an xts object for a given stock that contains the following 
-# technical indicators and trading rules ready for he machine learning layer
+# technical indicators and trading rules ready for the machine learning layer
+#
 #
 # Indicators:
 # - ema1    - ema2    - ema3    - sma1    - sma2    - sma3
@@ -56,10 +57,6 @@ LONGLAG<-61
 #  # create a vector of times at 10 sec intervals
 #  x<-as.POSIXct('2012-06-21 14:00:00', "%Y-%m-%d %H:%M:%S") + 10*c(1:5)
 #}
-
-
-
-
 
 
 createDatabase <- function(ticker,START,END) {
@@ -836,10 +833,12 @@ createDatabase <- function(ticker,START,END) {
   target <- rep(NA,length(choppedOpen))
   counter <- 1
   for(i in choppedClose) {
-    if(i>=choppedOpen[counter]) {
-      target[counter] <- 1
+    if(counter<length(choppedClose)) {
+      if(i<=choppedClose[counter+1]) {
+        target[counter]<- 1
+      }
+      else target[counter]<- -1
     }
-    else target[counter]<- -1
     counter <- counter+1
   }
   

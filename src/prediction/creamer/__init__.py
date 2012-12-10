@@ -261,7 +261,7 @@ class Predictor(object):
         return fraction_long-fraction_short, the_open, the_close
     
     def riskManagement(self,prediction):
-        if abs(prediction)<self.threshold: return 0.0
+        if abs(prediction)<self.threshold: return None
         else: return prediction
     
     def reviewExperts(self, the_open, the_close):
@@ -286,5 +286,5 @@ class Predictor(object):
         prediction = self.riskManagement(prediction)
         self.reviewExperts(the_open, the_close)
         self.trading_days_seen+=1
-        return prediction,(the_close>the_open)
+        return prediction, the_open, the_close
         

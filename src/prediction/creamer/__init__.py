@@ -29,6 +29,8 @@ class Predictor(object):
         self.lag = 100
         self.ticker = ticker
         self.threshold = 0.2
+        self.previeous_pred = 0.0
+        self.prediction = 0.0
         self.__writeSpecification()
         self.__createRDB()
         
@@ -243,7 +245,6 @@ class Predictor(object):
         test_date=self.date
         r.assign('testDate', test_date.strftime('%Y-%m-%d'))
         r('testDB<-DB[testDate]')
-        the_open = float(r('testDB$open')[0])
         the_close = float(r('testDB$close')[0])
         r('testDB<-subset(testDB, select = -c(close,ticker) )')
         r.assign('remoteFilename', test_file)
@@ -260,9 +261,9 @@ class Predictor(object):
         os.remove(test_file)
         # next close
         tomorrow = test_date+datetime.timedelta(days=1)
-        r.assign('remoteTomorrow',tomorrow)
+        r.assign('remoteTomorrow',tomorrow.strftime('%Y-%m-%d'))
         next_close = float(r('DB[remoteTomorrow]$close')[0])
-        return fraction_long-fraction_short, the_open, the_close, next_close
+        return fraction_long-fraction_short, the_close, next_close
     
     def riskManagement(self,prediction):
         if abs(prediction)<self.threshold: return None
@@ -283,12 +284,14 @@ class Predictor(object):
                 
     def makePrediction(self,date,verbose):
         self.date=date
+        self.previeous_pred = self.prediction
         if self.trading_days_seen%self.new_exp_freq==1:
             self.createClassifiers(verbose)
         self.reweightExperts()
-        prediction, the_open, the_close, next_close = self.getExpertsPrediction(verbose)
+        prediction, the_close, next_close = self.getExpertsPrediction(verbose)
         prediction = self.riskManagement(prediction)
         self.reviewExperts(the_close, next_close)
+        self.prediction=prediction
         self.trading_days_seen+=1
-        return prediction, the_open, the_close
+        return prediction, the_close
         

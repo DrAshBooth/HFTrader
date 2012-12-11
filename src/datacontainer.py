@@ -34,16 +34,19 @@ class DataContainer(object):
         self.close_prices = []
         self.open_trade_prices = {}
         self.close_trade_prices = {}
+        self.car = {}
+        self.cars = {}
         self.balances = {}
         for strat in strats:
             self.open_trade_prices[strat] = []
             self.close_trade_prices[strat] = []
             self.balances[strat] = []
+            self.cars[strat]=[]
         
-    def update_predictions_data(self, pred, the_open, the_close, cheat):
+    def update_predictions_data(self, pred, the_close, next_close, cheat):
         going_long=False
         correct=False
-        should_go_long = (the_close>the_open)
+        should_go_long = (next_close>the_close)
         self.num_predictions+=1
         if pred>0.0: 
             going_long=True
@@ -88,6 +91,10 @@ class DataContainer(object):
         
     def add_balances_data(self,strat, the_date, balance):
         self.balances[strat].append([the_date,balance])
+        
+    def update_car(self,strat,the_date, ret):
+        self.car[strat]+=ret
+        self.cars[strat].append([the_date, self.car])
         
     def percentage_correct(self):
         all_preds = (self.correct_predictions/float(self.num_predictions))*100

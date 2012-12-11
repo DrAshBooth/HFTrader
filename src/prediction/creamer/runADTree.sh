@@ -10,7 +10,7 @@ export CLASSPATH="$CLASSPATH:$JBOOST_DIR/dist/jboost.jar:$JBOOST_DIR/lib/jfreech
 
 
 cd $1
-java jboost.controller.Controller -b LogLossBoost -numRounds 50 -S $2 -P $2predict.py -n spec.spec
+java jboost.controller.Controller -b LogLossBoost -numRounds 30 -S $2 -P $2predict.py -n spec.spec
 
 #python ./error.py --info=$2.info
 

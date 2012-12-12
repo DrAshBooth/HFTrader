@@ -842,10 +842,10 @@ createDatabase <- function(ticker,START,END) {
     counter <- counter+1
   }
   
-  len<-c((length(remoteEMA1)-1):length(remoteEMA1))
+  len<-c((length(remoteEMA1)-1):length(remoteEMA1)) # remove last two
   
-  training<-data.frame(remoteDates[c(2:(length(remoteDates)-1))],choppedOpen[c(2:(length(choppedOpen)-1))],
-                       choppedClose[c(2:(length(choppedOpen)-1))],remoteEMA1[-len],remoteEMA2[-len],
+  training<-data.frame(remoteDates[-len],choppedOpen[-len],
+                       choppedClose[-len],remoteEMA1[-len],remoteEMA2[-len],
                        remoteEMA3[-len],remoteSMA1[-len],remoteSMA2[-len],remoteSMA3[-len],remoteBBL1[-len],
                        remoteBBH1[-len],remoteBBL2[-len],remoteBBH2[-len],remoteBBL3[-len],remoteBBH3[-len],
                        remoteMOM1[-len],remoteMOM2[-len],remoteMOM3[-len],remoteACC1[-len],remoteACC2[-len],
@@ -867,7 +867,7 @@ createDatabase <- function(ticker,START,END) {
                        accTR3[-len],rosTR1[-len],rocTR2[-len],rocTR3[-len],macdTR1[-len],macdTR2[-len],
                        macdTR3[-len],rsiTR1[-len],rsiTR2[-len],rsiTR3[-len],fastTR1[-len],fastTR2[-len],
                        fastTR3[-len],slowTR1[-len],slowTR2[-len],slowTR3[-len],willTR[-len],mfiTR[-len],
-                       pviTR[-len],nviTR[-len],tickerList[-len],target[c(2:(length(remoteDates)-1))])
+                       pviTR[-len],nviTR[-len],tickerList[-len],target[c(2:(length(target)-1))])
   
   colnames(training) <- c("date", "open","close", "ema1", "ema2", "ema3", "sma1","sma2","sma3","bbl1",
                           "bbh1","bbl2","bbh2","bbl3","bbh3","mom1","mom2","mom3","acc1","acc2","acc3",

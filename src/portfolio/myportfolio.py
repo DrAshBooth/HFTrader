@@ -21,7 +21,7 @@ class MyPortfolio(object):
         self.cash = cash
         self.stocks = {}
         
-        self.total_value = 0.0
+        self.total_value = cash
         self.update_value()
         
     def add_stock(self,ticker):

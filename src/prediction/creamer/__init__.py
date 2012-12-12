@@ -25,7 +25,7 @@ class Predictor(object):
         self.max_experts = max_experts
         self.start = start
         self.end = end
-        self.training_periods = [50,100,150,200]
+        self.training_periods = [200]
         self.lag = 100
         self.ticker = ticker
         self.threshold = 0.2
@@ -49,6 +49,7 @@ class Predictor(object):
         spec = open('{}/prediction/creamer/spec.spec'.format(os.getcwd()), 'w')
         spec.write('exampleTerminator=;\nattributeTerminator=,\nmaxBadExa=5\n')
         spec.write('Open\t\t\tnumber\n')
+        spec.write('Close\t\t\tnumber\n')
         spec.write('EMAn{}\t\t\tnumber\n'.format(EMAn1))
         spec.write('EMAn{}\t\t\tnumber\n'.format(EMAn2))
         spec.write('EMAn{}\t\t\tnumber\n'.format(EMAn3))
@@ -182,9 +183,9 @@ class Predictor(object):
             r.assign('windowEnd', day_before.strftime('%Y-%m-%d'))
             r.assign('testDate', test_date.strftime('%Y-%m-%d'))
             r('windowDB<-DB[paste(windowStart,windowEnd,sep="/")]')
-            r('windowDB<-subset(windowDB, select = -c(close,ticker) )')
+            r('windowDB<-subset(windowDB, select = -c(ticker) )')
             r('testDB<-DB[testDate]')
-            r('testDB<-subset(testDB, select = -c(close,ticker) )')
+            r('testDB<-subset(testDB, select = -c(ticker) )')
             r.assign('remoteFilename', filename)
             r('write.table(windowDB, file=paste(remoteFilename, "train", sep="."),quote=FALSE,sep=",",eol=";\n",row.names=FALSE,col.names=FALSE)')
             r('write.table(testDB, file=paste(remoteFilename, "test", sep="."),quote=FALSE,sep=",",eol=";\n",row.names=FALSE,col.names=FALSE)')
@@ -234,7 +235,7 @@ class Predictor(object):
                 weight_factor = math.exp((self.c*expert.cummulative_return)/math.sqrt(float(the_time-expert.born_at)))
                 expert.weight = expert.initial_weight*ramp*weight_factor
                 
-    def getExpertsPrediction(self, verbose):
+    def getExpertsPrediction(self, verbose, tomo, day_after):
         long_sum = 0.0
         total_sum = 0.0
         test_file = 'experts.test'
@@ -245,8 +246,7 @@ class Predictor(object):
         test_date=self.date
         r.assign('testDate', test_date.strftime('%Y-%m-%d'))
         r('testDB<-DB[testDate]')
-        the_close = float(r('testDB$close')[0])
-        r('testDB<-subset(testDB, select = -c(close,ticker) )')
+        r('testDB<-subset(testDB, select = -c(ticker) )')
         r.assign('remoteFilename', test_file)
         r('write.table(testDB, file=remoteFilename,quote=FALSE,sep=",",eol=";\n",row.names=FALSE,col.names=FALSE)')
         for expert in self.experts:
@@ -260,13 +260,14 @@ class Predictor(object):
         # Delete test file
         os.remove(test_file)
         # next close
-        tomorrow = test_date+datetime.timedelta(days=1)
-        r.assign('remoteTomorrow',tomorrow.strftime('%Y-%m-%d'))
+        r.assign('remoteTomorrow',tomo.strftime('%Y-%m-%d'))
         next_close = float(r('DB[remoteTomorrow]$close')[0])
-        return fraction_long-fraction_short, the_close, next_close
+        r.assign('remoteDayAft',day_after.strftime('%Y-%m-%d'))
+        close_after = float(r('DB[remoteDayAft]$close')[0])
+        return fraction_long-fraction_short, next_close, close_after
     
     def riskManagement(self,prediction):
-        if abs(prediction)<self.threshold: return None
+        if abs(prediction)<self.threshold: return 0.0
         else: return prediction
     
     def reviewExperts(self, the_close, next_close):
@@ -282,16 +283,16 @@ class Predictor(object):
                 if exp.prediction<0.0: exp.cummulative_return+=abs_return
                 else: exp.cummulative_return-=abs_return
                 
-    def makePrediction(self,date,verbose):
+    def makePrediction(self,date, tomo, day_after, verbose):
         self.date=date
         self.previeous_pred = self.prediction
         if self.trading_days_seen%self.new_exp_freq==1:
             self.createClassifiers(verbose)
         self.reweightExperts()
-        prediction, the_close, next_close = self.getExpertsPrediction(verbose)
+        prediction, next_close, close_after = self.getExpertsPrediction(verbose, tomo, day_after)
         prediction = self.riskManagement(prediction)
-        self.reviewExperts(the_close, next_close)
+        self.reviewExperts(next_close, close_after)
         self.prediction=prediction
         self.trading_days_seen+=1
-        return prediction, the_close
+        return prediction, next_close, close_after
         
